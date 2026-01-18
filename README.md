@@ -1,4 +1,4 @@
-# RustCrypto: Password Hashes
+# RustCrypto: Password Hashes -- **Unofficial fork with [Allocator API](https://github.com/rust-lang/wg-allocators) support**
 
 [![Project Chat][chat-image]][chat-link]
 ![Apache2/MIT licensed][license-image]

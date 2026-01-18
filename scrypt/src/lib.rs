@@ -1,4 +1,5 @@
 #![no_std]
+#![feature(allocator_api)]
 #![doc = include_str!("../README.md")]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc(
@@ -43,9 +44,12 @@
 //! # }
 //! ```
 
-#[macro_use]
 extern crate alloc;
 
+use alloc::{
+    alloc::{Allocator, Global},
+    vec::Vec,
+};
 use pbkdf2::pbkdf2_hmac;
 use sha2::Sha256;
 
@@ -93,6 +97,16 @@ pub fn scrypt(
     params: &Params,
     output: &mut [u8],
 ) -> Result<(), errors::InvalidOutputLen> {
+    scrypt_in(password, salt, params, output, Global)
+}
+
+pub fn scrypt_in(
+    password: &[u8],
+    salt: &[u8],
+    params: &Params,
+    output: &mut [u8],
+    alloc: impl Allocator,
+) -> Result<(), errors::InvalidOutputLen> {
     // This check required by Scrypt:
     // check output.len() > 0 && output.len() <= (2^32 - 1) * 32
     if output.is_empty() || output.len() / 32 > 0xffff_ffff {
@@ -106,22 +120,25 @@ pub fn scrypt(
     let pr128 = (params.p as usize) * r128;
     let nr128 = n * r128;
 
-    let mut b = vec![0u8; pr128];
+    let mut b = Vec::with_capacity_in(pr128, &alloc);
+    b.resize(pr128, 0u8);
     pbkdf2_hmac::<Sha256>(password, salt, 1, &mut b);
 
     #[cfg(not(feature = "parallel"))]
-    romix_sequential(nr128, r128, n, &mut b);
+    romix_sequential(nr128, r128, n, &mut b, &alloc);
     #[cfg(feature = "parallel")]
-    romix_parallel(nr128, r128, n, &mut b);
+    romix_parallel(nr128, r128, n, &mut b, &alloc);
 
     pbkdf2_hmac::<Sha256>(password, &b, 1, output);
     Ok(())
 }
 
 #[cfg(not(feature = "parallel"))]
-fn romix_sequential(nr128: usize, r128: usize, n: usize, b: &mut [u8]) {
-    let mut v = vec![0u8; nr128];
-    let mut t = vec![0u8; r128];
+fn romix_sequential(nr128: usize, r128: usize, n: usize, b: &mut [u8], alloc: impl Allocator) {
+    let mut v = Vec::with_capacity_in(nr128, &alloc);
+    v.resize(nr128, 0u8);
+    let mut t = Vec::with_capacity_in(r128, &alloc);
+    t.resize(r128, 0u8);
 
     b.chunks_mut(r128).for_each(|chunk| {
         romix::scrypt_ro_mix(chunk, &mut v, &mut t, n);
@@ -129,12 +146,14 @@ fn romix_sequential(nr128: usize, r128: usize, n: usize, b: &mut [u8]) {
 }
 
 #[cfg(feature = "parallel")]
-fn romix_parallel(nr128: usize, r128: usize, n: usize, b: &mut [u8]) {
+fn romix_parallel(nr128: usize, r128: usize, n: usize, b: &mut [u8], alloc: impl Allocator) {
     use rayon::{iter::ParallelIterator as _, slice::ParallelSliceMut as _};
 
-    b.par_chunks_mut(r128).for_each(|chunk| {
-        let mut v = vec![0u8; nr128];
-        let mut t = vec![0u8; r128];
+    b.par_chunks_mut(r128).for_each(move |chunk| {
+        let mut v = Vec::with_capacity_in(nr128, &alloc);
+        v.resize(nr128, 0u8);
+        let mut t = Vec::with_capacity_in(r128, &alloc);
+        t.resize(r128, 0u8);
         romix::scrypt_ro_mix(chunk, &mut v, &mut t, n);
     });
 }
