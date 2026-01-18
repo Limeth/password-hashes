@@ -1,4 +1,5 @@
 #![no_std]
+#![feature(allocator_api)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc = include_str!("../README.md")]
 #![doc(
@@ -157,6 +158,8 @@ pub use {
 };
 
 use crate::blake2b_long::blake2b_long;
+#[cfg(feature = "alloc")]
+use alloc::alloc::Allocator;
 use blake2::{Blake2b512, Digest, digest};
 use core::fmt;
 use memory::Memory;
@@ -270,8 +273,20 @@ impl<'key> Argon2<'key> {
     /// Hash a password and associated parameters into the provided output buffer.
     #[cfg(feature = "alloc")]
     pub fn hash_password_into(&self, pwd: &[u8], salt: &[u8], out: &mut [u8]) -> Result<()> {
+        self.hash_password_into_in(pwd, salt, out, alloc::alloc::Global)
+    }
+
+    /// Hash a password and associated parameters into the provided output buffer.
+    #[cfg(feature = "alloc")]
+    pub fn hash_password_into_in(
+        &self,
+        pwd: &[u8],
+        salt: &[u8],
+        out: &mut [u8],
+        alloc: impl Allocator,
+    ) -> Result<()> {
         let blocks_len = self.params.block_count();
-        let mut blocks = block::Blocks::new(blocks_len).ok_or(Error::OutOfMemory)?;
+        let mut blocks = block::Blocks::new(blocks_len, alloc).ok_or(Error::OutOfMemory)?;
         self.hash_password_into_with_memory(pwd, salt, out, blocks.as_slice())
     }
 
